@@ -45,30 +45,6 @@ typedef struct
     int bottomPieceSize;
 } FileInfo;
 
-bool connectToServer(ServerInfo *serverInfo)
-{
-    serverInfo->sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (serverInfo->sock == -1)
-    {
-        printf("Failed to create server socket\n");
-        return false;
-    }
-
-    serverInfo->server.sin_family = AF_INET;
-    inet_aton(serverInfo->IP, &serverInfo->server.sin_addr);
-    serverInfo->server.sin_port = htons(serverInfo->port);
-
-    serverInfo->serverLen = sizeof(serverInfo->server);
-    int conn = connect(serverInfo->sock, (struct sockaddr *) &serverInfo->server, serverInfo->serverLen);
-    if (conn == -1)
-    {
-        printf("Was unable to connect to %s\n", serverInfo->name);
-        return false;
-    }
-
-    return true;
-}
-
 bool parseConfigFile(char *dfConFileName, ServerInfo servers[NUMSERVERS], User *user)
 {
     FILE* dfConFile;
@@ -106,6 +82,30 @@ bool parseConfigFile(char *dfConFileName, ServerInfo servers[NUMSERVERS], User *
     return true;
 }
 
+bool connectToServer(ServerInfo *serverInfo)
+{
+    serverInfo->sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverInfo->sock == -1)
+    {
+        printf("Failed to create server socket\n");
+        return false;
+    }
+
+    serverInfo->server.sin_family = AF_INET;
+    inet_aton(serverInfo->IP, &serverInfo->server.sin_addr);
+    serverInfo->server.sin_port = htons(serverInfo->port);
+
+    serverInfo->serverLen = sizeof(serverInfo->server);
+    int conn = connect(serverInfo->sock, (struct sockaddr *) &serverInfo->server, serverInfo->serverLen);
+    if (conn == -1)
+    {
+        printf("Was unable to connect to %s\n", serverInfo->name);
+        return false;
+    }
+
+    return true;
+}
+
 int connectToServers(ServerInfo servers[NUMSERVERS])
 {
     int connsMade = 0;
@@ -127,11 +127,24 @@ int connectToServers(ServerInfo servers[NUMSERVERS])
     return connsMade;
 }
 
-void printCommands() {
+void printCommands() 
+{
     printf("Please enter one of the following commands: \n");
     printf("  - %s\n", "list");
     printf("  - %s\n", "get [file_name]");
     printf("  - %s\n", "put [file_name]");
+    printf("  - %s\n", "exit");
+}
+
+void getCommand(char *command, char *fileName)
+{
+    printCommands();
+    bzero(command, strlen(command));
+    bzero(fileName, strlen(fileName));
+
+    char buf[100];
+    fgets(buf, 100, stdin);
+    sscanf(buf, "%s %s\n", command, fileName);
 }
 
 long int getFileSize(FILE* file)
@@ -185,6 +198,21 @@ int getMD5HashInt(FILE* fp)
     return getIntFromMD5Hash(hashStr);
 }
 
+bool list(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
+{
+    return false;
+}
+
+bool put(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
+{
+    return false;
+}
+
+bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
+{
+    return false;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) 
@@ -198,18 +226,57 @@ int main(int argc, char **argv)
 
     if (!parseConfigFile(argv[1], servers, &user))
     {
+        printf("Unable to parse %s file", argv[1]);
         return -1;
     }
-
-    for (int i=0; i < NUMSERVERS; i++)
-    {
-        printf("%s %s %d\n", servers[i].name, servers[i].IP, servers[i].port);
-    }
-    printf("%s %s\n", user.name, user.password);
-
+    
     if (connectToServers(servers) != NUMSERVERS)
     {
         printf("poo\n");
     }
+
+    char command[10];
+    char fileName[50];
+    while (1)
+    {
+        getCommand(command, fileName);
+
+        if (strcmp(command, "exit") == 0)
+        {
+            return 0;
+        }
+        else if (strcmp(command, "list") == 0)
+        {
+            if (!list(servers, &user, fileName))
+            {
+                printf("'list' operation failed\n");
+            }
+        }
+        else
+        {
+            if (strlen(fileName) == 0)
+            {
+                printf("Please enter a filename\n");
+            }
+
+            else if (strcmp(command, "put") == 0)
+            {
+                if (!put(servers, &user, fileName))
+                {
+                    printf("'put %s' failed\n", fileName);
+                }
+            }
+
+            else if (strcmp(command, "get") == 0)
+            {
+                if (!get(servers, &user, fileName))
+                {
+                    printf("'get %s' failed\n", fileName);
+                }
+            }
+        }
+        printf("\n");
+    }
+
     return 0;
 }
