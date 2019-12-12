@@ -1,7 +1,12 @@
+#include <arpa/inet.h>
 #include <math.h>   /* fmin */
+#include <netdb.h>
+#include <netinet/in.h>
+#include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h> /* strtol */
+#include <stdlib.h>
 #include <strings.h>    /* bzero */
+#include <sys/socket.h>  /* for socket use */
 #include <unistd.h> /* read, write */
 
 #if defined(__APPLE__)
@@ -13,6 +18,57 @@
 #endif
 
 #define HASHLEN 32
+#define NUMSERVERS 4
+
+typedef struct
+{
+    char name[10];
+    char IP[45];
+    int port;
+    struct sockaddr_in server;
+    socklen_t serverLen;
+    int sock;
+} ServerInfo;
+
+typedef struct
+{
+    char fileName[100];
+    int topPieceNum;
+    int topPieceSize;
+    int bottomPieceNum;
+    int bottomPieceSize;
+} FileInfo;
+
+bool connectToServer(ServerInfo *serverInfo)
+{
+    serverInfo->sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverInfo->sock == -1)
+    {
+        printf("Failed to create server socket\n");
+        return false;
+    }
+
+    serverInfo->server.sin_family = AF_INET;
+    inet_aton(serverInfo->IP, &serverInfo->server.sin_addr);
+    serverInfo->server.sin_port = htons(serverInfo->port);
+
+    serverInfo->serverLen = sizeof(serverInfo->server);
+    int conn = connect(serverInfo->sock, (struct sockaddr *) &serverInfo->server, serverInfo->serverLen);
+    if (conn == -1)
+    {
+        printf("Was unable to connect to %s\n", serverInfo->name);
+        return false;
+    }
+
+    return true;
+}
+
+void printCommands() {
+    printf("Please enter one of the following commands: \n");
+    printf("  - %s\n", "list");
+    printf("  - %s\n", "get [file_name]");
+    printf("  - %s\n", "put [file_name]");
+}
 
 long int getFileSize(FILE* file)
 {
@@ -44,7 +100,7 @@ int getMD5HashInt(FILE* fp)
     int bufSize = 1024;
     char buffer[bufSize];
     int bytesRead, bytesToBeRead;
-    
+
     bytesToBeRead = getFileSize(fp);
     fseek(fp, 0, SEEK_SET);
 
@@ -67,9 +123,27 @@ int getMD5HashInt(FILE* fp)
 
 int main(int argc, char **argv)
 {
-    FILE* fp = fopen(argv[1], "rb");
-    int md5HashSum = getMD5HashInt(fp);
-    fclose(fp);
+    if (argc < 2) 
+    {
+        fprintf(stderr, "usage: %s <dfc.conf>\n", argv[0]);
+        exit(0);
+    }
+    
+    ServerInfo testServer;
+    strcpy(testServer.name, "DFS1");
+    strcpy(testServer.IP, "127.0.0.1");
+    testServer.port = 10001;
+
+    if (!connectToServer(&testServer))
+    {
+        printf("poo\n");
+    }
+
+    char serverBuffer[100];
+    strcpy(serverBuffer, "testing yoooo\n");
+    send(testServer.sock, serverBuffer, sizeof(serverBuffer), 0);
+
+    close(testServer.sock);
     
     printf("%d\n", md5HashSum);
     return 0;
