@@ -22,6 +22,12 @@
 
 typedef struct
 {
+    char name[100];
+    char password[100];
+} User;
+
+typedef struct
+{
     char name[10];
     char IP[45];
     int port;
@@ -61,6 +67,64 @@ bool connectToServer(ServerInfo *serverInfo)
     }
 
     return true;
+}
+
+bool parseConfigFile(char *dfConFileName, ServerInfo servers[NUMSERVERS], User *user)
+{
+    FILE* dfConFile;
+    char * line = NULL;
+    size_t len = 0;
+    ssize_t read;
+
+    dfConFile = fopen(dfConFileName, "r");
+    if (!dfConFile)
+    {
+        printf("Unable to open %s\n", dfConFileName);
+        return false;
+    }
+
+    int i = 0;
+    while (i < NUMSERVERS && (read = getline(&line, &len, dfConFile)) != -1)
+    {
+        sscanf(line, "Server %s %[^:]:%d\n", servers[i].name, servers[i].IP, &servers[i].port);
+        i++;
+    }
+
+    if ((read = getline(&line, &len, dfConFile)) != -1)
+    {
+        sscanf(line, "Username: %s\n", user->name);
+    }
+    if ((read = getline(&line, &len, dfConFile)) != -1)
+    {
+        sscanf(line, "Password: %s\n", user->password);
+    }
+
+    fclose(dfConFile);
+    if (line)
+        free(line);
+    
+    return true;
+}
+
+int connectToServers(ServerInfo servers[NUMSERVERS])
+{
+    int connsMade = 0;
+    for (int i = 0; i < NUMSERVERS; i++)
+    {
+        if (!connectToServer(&servers[i]))
+        {
+            printf("poo for server %d\n", i+1);
+            continue;
+        }
+        connsMade++;
+
+        char serverBuffer[100];
+        strcpy(serverBuffer, "testing yoooo\n");
+        send(servers[0].sock, serverBuffer, sizeof(serverBuffer), 0);
+
+        close(servers[0].sock);
+    }
+    return connsMade;
 }
 
 void printCommands() {
@@ -128,23 +192,24 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s <dfc.conf>\n", argv[0]);
         exit(0);
     }
-    
-    ServerInfo testServer;
-    strcpy(testServer.name, "DFS1");
-    strcpy(testServer.IP, "127.0.0.1");
-    testServer.port = 10001;
 
-    if (!connectToServer(&testServer))
+    ServerInfo servers[NUMSERVERS];
+    User user;
+
+    if (!parseConfigFile(argv[1], servers, &user))
+    {
+        return -1;
+    }
+
+    for (int i=0; i < NUMSERVERS; i++)
+    {
+        printf("%s %s %d\n", servers[i].name, servers[i].IP, servers[i].port);
+    }
+    printf("%s %s\n", user.name, user.password);
+
+    if (connectToServers(servers) != NUMSERVERS)
     {
         printf("poo\n");
     }
-
-    char serverBuffer[100];
-    strcpy(serverBuffer, "testing yoooo\n");
-    send(testServer.sock, serverBuffer, sizeof(serverBuffer), 0);
-
-    close(testServer.sock);
-    
-    printf("%d\n", md5HashSum);
     return 0;
 }
