@@ -147,6 +147,11 @@ void getCommand(char *command, char *fileName)
     sscanf(buf, "%s %s\n", command, fileName);
 }
 
+bool list(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
+{
+    return false;
+}
+
 long int getFileSize(FILE* file)
 {
     fseek(file, 0L, SEEK_END);
@@ -198,13 +203,34 @@ int getMD5HashInt(FILE* fp)
     return getIntFromMD5Hash(hashStr);
 }
 
-bool list(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
+void assignPieces(int fileHashInt, int pieces[NUMSERVERS * 2])
 {
-    return false;
+    for (int i = 0; i < NUMSERVERS; i++)
+    {
+        pieces[i*2] = (((((NUMSERVERS - fileHashInt) % NUMSERVERS) + i) % NUMSERVERS) + 1) % (NUMSERVERS+1);
+        pieces[(i*2)+1] = (pieces[i*2] % 4) + 1;
+    }
+
+    for (int i = 0; i < 8; i++)
+    {
+        printf("%d ", pieces[i]);
+    }
+    printf("\n");
 }
 
 bool put(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 {
+    FILE* fp = fopen(fileName, "rb");
+    if (!fp)
+    {
+        printf("Couldn't open '%s'\n", fileName);
+        return false;
+    }
+
+    int pieces[NUMSERVERS * 2];
+    int fileHashInt = getMD5HashInt(fp);
+    assignPieces(fileHashInt, pieces);
+
     return false;
 }
 
@@ -215,6 +241,12 @@ bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 
 int main(int argc, char **argv)
 {
+    int assignments[8];
+    assignPieces(0, assignments);
+    assignPieces(1, assignments);
+    assignPieces(2, assignments);
+    assignPieces(3, assignments);
+    return 0;
     if (argc < 2) 
     {
         fprintf(stderr, "usage: %s <dfc.conf>\n", argv[0]);
@@ -249,30 +281,21 @@ int main(int argc, char **argv)
         {
             if (!list(servers, &user, fileName))
             {
-                printf("'list' operation failed\n");
+                printf("'list' failed\n");
             }
         }
-        else
+        else if (strcmp(command, "put") == 0)
         {
-            if (strlen(fileName) == 0)
+            if (!put(servers, &user, fileName))
             {
-                printf("Please enter a filename\n");
+                printf("'put %s' failed\n", fileName);
             }
-
-            else if (strcmp(command, "put") == 0)
+        }
+        else if (strcmp(command, "get") == 0)
+        {
+            if (!get(servers, &user, fileName))
             {
-                if (!put(servers, &user, fileName))
-                {
-                    printf("'put %s' failed\n", fileName);
-                }
-            }
-
-            else if (strcmp(command, "get") == 0)
-            {
-                if (!get(servers, &user, fileName))
-                {
-                    printf("'get %s' failed\n", fileName);
-                }
+                printf("'get %s' failed\n", fileName);
             }
         }
         printf("\n");
