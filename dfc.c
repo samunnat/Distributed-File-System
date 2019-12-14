@@ -2,6 +2,7 @@
 #include <math.h>   /* fmin */
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -265,19 +266,23 @@ bool sendPiece(FILE *fp, int serverSock, PieceInfo *pieceInfo, char *buffer)
         return false;
     }
 
-    // fseek(fp, pieceInfo->fileInd, SEEK_SET);
+    fseek(fp, pieceInfo->fileInd, SEEK_SET);
 
-    // int bytesRead = 0;
-    // int bytesToBeRead = pieceInfo->bytes;
+    int bytesRead = 0;
+    int bytesToBeRead = pieceInfo->bytes;
 
-    // int readBufferSize = fmin(bytesToBeRead, BUFLEN);
-    // while ( bytesToBeRead > 0 && (bytesRead = fread(buffer, 1, readBufferSize, fp)) > 0)
-    // {
-    //     write(serverSock, buffer, bytesRead);
-    //     bytesToBeRead -= bytesRead;
-    //     readBufferSize = fmin(bytesToBeRead, BUFLEN);
-    //     bzero(buffer, BUFLEN);
-    // }
+    int readBufferSize = fmin(bytesToBeRead, BUFLEN);
+    sleep(1);
+    while ( bytesToBeRead > 0 && (bytesRead = fread(buffer, 1, readBufferSize, fp)) > 0)
+    {
+        int sentBytes = write(serverSock, buffer, bytesRead);
+        printf("sent %d bytes for piece %d\n", sentBytes, pieceInfo->pieceNum);;
+
+        bytesToBeRead -= bytesRead;
+
+        readBufferSize = fmin(bytesToBeRead, BUFLEN);
+        bzero(buffer, BUFLEN);
+    }
     
     return true;
 }
@@ -331,7 +336,7 @@ bool put(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
     }
 
     fclose(fp);
-    return false;
+    return true;
 }
 
 bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)

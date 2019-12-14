@@ -106,12 +106,38 @@ void printPieceInfo(PieceInfo *pieceInfo)
     printf("%s %d %d %d\n", pieceInfo->fileName, pieceInfo->pieceNum, pieceInfo->fileInd, pieceInfo->bytes);
 }
 
-bool getPieceFile(FILE *fp, char *userDir, PieceInfo *pieceInfo)
+void getPieceFileName(char *userDir, PieceInfo *pieceInfo ,char *pieceFileName)
 {
-    char fileName[50];
-    snprintf(fileName, 50, "%s/.%s.%d", userDir, pieceInfo->fileName, pieceInfo->pieceNum+1);
-    fp = fopen(fileName, "wb+");
-    return fp;
+    snprintf(pieceFileName, 50, "%s/.%s.%d", userDir, pieceInfo->fileName, pieceInfo->pieceNum+1);
+}
+
+bool handlePut(int clientSock, User *user, char *userDir, char *buffer)
+{
+    PieceInfo pieceInfo;
+    read(clientSock, buffer, BUFLEN);
+    deserializePieceInfo(buffer, &pieceInfo);
+    printPieceInfo(&pieceInfo);
+
+    FILE *pieceFile;
+    char pieceFileName[50];
+    getPieceFileName(userDir, &pieceInfo, pieceFileName);
+    pieceFile = fopen(pieceFileName, "wb+");
+
+    if (!pieceFile)
+    {
+        return false;
+    }
+    
+    int received_bytes = 0;
+    while ((received_bytes = read(clientSock, buffer, BUFLEN)) > 0) 
+    {
+        printf("received %d bytes\n", received_bytes);
+        fwrite(buffer, 1, received_bytes, pieceFile);
+        
+        bzero(buffer, BUFLEN);
+    }
+    fclose(pieceFile);
+    return true;
 }
 
 void handleRequest(int clientSock)
@@ -131,22 +157,7 @@ void handleRequest(int clientSock)
     char userDir[20];
     validateUserDir(user.name, userDir);
 
-    PieceInfo pieceInfo;
-    read(clientSock, buffer, BUFLEN);
-    deserializePieceInfo(buffer, &pieceInfo);
-    printPieceInfo(&pieceInfo);
-
-    FILE *pieceFile = NULL;
-    getPieceFile(pieceFile, userDir, &pieceInfo);
-    
-    // int bytesToBeRead = pieceInfo.bytes;
-    // int bytesRead = 0;
-    // while (bytesToBeRead > 0)
-    // {
-    //     bytesRead = read(clientSock, buffer, BUFSIZ);
-    //     printf("%s", buffer);
-    //     bytesToBeRead -= bytesRead;
-    // }
+    handlePut(clientSock, &user, userDir, buffer);
     
     printf("done\n");
 }
