@@ -24,6 +24,7 @@
 #define NUMSERVERS 4
 #define NUMPIECES (NUMSERVERS * 2)
 #define BUFLEN 8192
+#define FILELIMIT 20
 
 typedef struct
 {
@@ -48,6 +49,14 @@ typedef struct
     socklen_t serverLen;
     int sock;
 } ServerInfo;
+
+typedef struct FileInfo
+{
+    char fileName[50];
+    int pieceLocs[NUMSERVERS*2];
+    int pieceSizes[NUMSERVERS];
+    struct FileInfo *next;
+} FileInfo;
 
 bool parseConfigFile(char *dfConFileName, ServerInfo servers[NUMSERVERS], User *user)
 {
@@ -123,6 +132,14 @@ int connectToServers(ServerInfo servers[NUMSERVERS])
     return connsMade;
 }
 
+void closeServerSockets(ServerInfo servers[NUMSERVERS])
+{
+    for (int i = 0; i < NUMSERVERS; i++)
+    {
+        close(servers[i].sock);
+    }
+}
+
 void printCommands() 
 {
     printf("Please enter one of the following commands: \n");
@@ -164,22 +181,59 @@ bool isValidRequest(int serverSock, User *user, char *command, char *buffer)
     return validUser == 1;
 }
 
-// bool parseServerList(buffer, PieceNode pieceNode)
-// {
-//     char *pieceNodeInfo = NULL;
-//     ssize_t len = 0;
-//     pieceNodeInfo = strtok(buffer, "\n");
-//     while (pieceNodeInfo != NULL)
-//     {
-//         pieceNode->fileName = calloc(strlen(pieceNodeInfo), 0);
-//         strcpy(pieceNode->fileName, pieceNodeInfo);
-//         pieceNode->pieceNum = -1;
-//         pieceNode->size = -1;
-//     }
-// }
+void initializeFileInfo(FileInfo *fileInfo)
+{
+    for (int i = 0; i < NUMSERVERS*2; i++)
+    {
+        fileInfo->pieceLocs[i] = -1;
+    }
+}
+
+void loadFileInfo(char *line, int serverInd, FileInfo *fileInfo)
+{
+    char fileName[50];
+    int pieceNum = -1;
+    int pieceSize = -1;
+    sscanf(line, "%s %d %d", fileName, &pieceNum, &pieceSize);
+
+    printf("heree\n");
+    FileInfo *crawl = fileInfo;
+    while ( crawl != NULL && strcmp(crawl->fileName, fileName) != 0)
+    {
+        crawl = crawl->next;
+    }
+    if (crawl == NULL)
+    {
+        crawl = malloc(sizeof(FileInfo));
+        initializeFileInfo(crawl);
+        strcpy(crawl->fileName, fileName);
+    }
+    int pieceInd = (pieceNum-1)*2;
+    if (crawl->pieceSizes[pieceInd] == -1)
+    {
+        crawl->pieceSizes[pieceInd] = serverInd;
+    }
+    else
+    {
+        printf("server %d has piece %d\n", crawl->pieceSizes[pieceNum], pieceNum);
+        crawl->pieceSizes[pieceInd+1] = serverInd;
+    }
+    crawl->pieceSizes[pieceNum-1] = pieceSize;
+}
+
+bool parseFileInfoList(char *buffer, int serverInd, FileInfo *fileInfo)
+{
+    char * line = strtok(strdup(buffer), "\n");
+    while(line) {
+        //printf("%s\n", line);
+        loadFileInfo(line, serverInd, fileInfo);
+        line  = strtok(NULL, "\n");
+    }
+    return true;
+}
 
 // bool getFilePieceList(ServerInfo servers[NUMSERVERS], User *user, char *fileName, PieceNode pieceList[NUMSERVERS])
-bool getFilePieceList(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
+bool getFileInfoList(ServerInfo servers[NUMSERVERS], User *user, char *fileName, FileInfo *fileInfo)
 {
     char buffer[BUFLEN];
     
@@ -187,8 +241,7 @@ bool getFilePieceList(ServerInfo servers[NUMSERVERS], User *user, char *fileName
     {
         if (!connectToServer(&servers[i]))
         {
-            printf("unable to connect to %s\n", servers[i].name);
-            return false;
+            continue;
         }
         if (!isValidRequest(servers[i].sock, user, "list", buffer))
         {
@@ -199,27 +252,41 @@ bool getFilePieceList(ServerInfo servers[NUMSERVERS], User *user, char *fileName
 
         recv(servers[i].sock, buffer, BUFLEN, 0);
         
-        printf("%s", buffer);
-
+        if (strcmp(buffer, "Empty") == 0)
+        {
+            printf("server %s got nothing\n", servers[i].name);
+        }
+        else
+        {
+            parseFileInfoList(buffer, i, fileInfo);
+        }
+        bzero(buffer, BUFLEN);
         printf("%s done\n", servers[i].name);
         close(servers[i].sock);
     }
     return true;
 }
 
-// void printPieceList(PieceNode pieceList[NUMSERVERS])
-// {
-//     printf("poo\n");
-// }
+void printFileInfoList(FileInfo *fi)
+{
+
+}
+
+void freeFileInfoList(FileInfo *fileInfo)
+{
+
+}
 
 bool list(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 {
     char buf[BUFLEN];
     //PieceNode pieceList[NUMSERVERS];
+    //getFilePieceList(servers, user, fileName, pieceList);'
+    FileInfo *fileInfo = NULL;
 
-    //getFilePieceList(servers, user, fileName, pieceList);
-    getFilePieceList(servers, user, fileName);
-    //printPieceList(pieceList);
+    getFileInfoList(servers, user, fileName, fileInfo);
+    printFileInfoList(fileInfo);
+    freeFileInfoList(fileInfo);
     return false;
 }
 
@@ -407,14 +474,6 @@ bool put(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 {
     return false;
-}
-
-void closeServerSockets(ServerInfo servers[NUMSERVERS])
-{
-    for (int i = 0; i < NUMSERVERS; i++)
-    {
-        close(servers[i].sock);
-    }
 }
 
 int main(int argc, char **argv)

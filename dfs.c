@@ -185,17 +185,19 @@ bool handleList(int clientSock, User *user, char *userDirName, char *buffer)
     while((de = readdir(userDir)) != NULL)
     {
         char *fNameAfterDot = de->d_name + 1;
-        sscanf(fNameAfterDot, "%[^.].%s", fileName, extensionWithPieceNum);
+        sscanf(fNameAfterDot, "%[^.]%s", fileName, extensionWithPieceNum);
+        //printf("epn: %s\n", extensionWithPieceNum);
 
         int pieceNum;
-        sscanf(extensionWithPieceNum, "%[^.].%d", extension, &pieceNum);
-        snprintf(fileName + strlen(fileName), strlen(fileName), ".%s", extension);
+        sscanf(extensionWithPieceNum+1, "%[^.].%d", extension, &pieceNum);
+        
+        snprintf(fileName + strlen(fileName), 50, ".%s", extension);
 
         snprintf(fullFileName, 50, "%s/%s", userDirName, de->d_name);
         
         int fileSize = getFileSize(fullFileName);
 
-        printf("%s %d %d \n", fileName, pieceNum, fileSize);
+        //printf("%s %d %d \n", fileName, pieceNum, fileSize);
         snprintf(buffer + strlen(buffer), BUFLEN, "%s %d %d \n", fileName, pieceNum, fileSize);
 
         bzero(fullFileName, 50);
