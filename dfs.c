@@ -9,14 +9,147 @@
 #include <string.h>      /* for fgets */
 #include <strings.h>     /* for bzero, bcopy */
 #include <sys/socket.h>  /* for socket use */
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>      /* for read, write */
 
 #define LISTENQ  1024  /* second argument to listen */
-#define BUFSIZE 8192
+#define BUFLEN 8192
+#define DFSCONFILE "dfs.conf"
+char serverDir[20];
 
 int open_listenfd(int port);
 void *thread(void *vargp);
+
+typedef struct
+{
+    char name[100];
+    char password[100];
+} User;
+
+typedef struct
+{
+    char fileName[50];
+    int pieceNum;
+    int fileInd;
+    int bytes;
+} PieceInfo;
+
+void validateDir(char *dirName)
+{
+    struct stat st = {0};
+
+    if (stat(dirName, &st) == -1) {
+        mkdir(dirName, 0700);
+    }
+}
+
+void validateUserDir(char *userName, char *userDirName)
+{
+    strcpy(userDirName, serverDir);
+    strcat(userDirName, "/");
+    strcat(userDirName, userName);
+    validateDir(userDirName);
+}
+
+void deserializeUser(char *buf, User *user)
+{
+    sscanf(buf, "%s %s \r\n\r\n", user->name, user->password);
+    bzero(buf, BUFLEN);
+}
+
+bool isVerifiedUser(User *user)
+{
+    FILE* dfsConf;
+    char * line = NULL;
+    size_t len = 0;
+    ssize_t read;
+    
+    dfsConf = fopen(DFSCONFILE, "r");
+    if (!dfsConf)
+    {
+        printf("Unable to open %s\n", DFSCONFILE);
+        return false;
+    }
+
+    char username[100];
+    char password[100];
+    while ((read = getline(&line, &len, dfsConf)) != -1) 
+    {
+        sscanf(line, "%s %s\n", username, password);
+        if (strcmp(username, user->name) == 0)
+        {
+            return strcmp(password, user->password) == 0;
+        }
+
+        memset(username, 0, sizeof(username));
+        memset(password, 0, sizeof(password));
+    }
+    
+    fclose(dfsConf);
+    if (line)
+        free(line);
+    
+    printf("User %s not found\n", user->name);
+    return false;
+}
+
+void deserializePieceInfo(char *buf, PieceInfo *pieceInfo)
+{
+    sscanf(buf, "%s %d %d %d \r\n\r\n", pieceInfo->fileName, &pieceInfo->pieceNum, &pieceInfo->fileInd, &pieceInfo->bytes);
+    bzero(buf, BUFLEN);
+}
+
+void printPieceInfo(PieceInfo *pieceInfo)
+{
+    printf("%s %d %d %d\n", pieceInfo->fileName, pieceInfo->pieceNum, pieceInfo->fileInd, pieceInfo->bytes);
+}
+
+bool getPieceFile(FILE *fp, char *userDir, PieceInfo *pieceInfo)
+{
+    char fileName[50];
+    snprintf(fileName, 50, "%s/.%s.%d", userDir, pieceInfo->fileName, pieceInfo->pieceNum+1);
+    fp = fopen(fileName, "wb+");
+    return fp;
+}
+
+void handleRequest(int clientSock)
+{
+    char buffer[BUFLEN];
+    
+    User user;
+    read(clientSock, buffer, BUFLEN);
+    deserializeUser(buffer, &user);
+
+    bool isUserValid = isVerifiedUser(&user);
+    printf("%s is %d\n", user.name, isUserValid);
+
+    snprintf(buffer, BUFLEN, "%d \r\n\r\n", isUserValid);
+    send(clientSock, buffer, strlen(buffer), 0);
+    
+    char userDir[20];
+    validateUserDir(user.name, userDir);
+
+    PieceInfo pieceInfo;
+    read(clientSock, buffer, BUFLEN);
+    deserializePieceInfo(buffer, &pieceInfo);
+    printPieceInfo(&pieceInfo);
+
+    FILE *pieceFile = NULL;
+    getPieceFile(pieceFile, userDir, &pieceInfo);
+    
+    // int bytesToBeRead = pieceInfo.bytes;
+    // int bytesRead = 0;
+    // while (bytesToBeRead > 0)
+    // {
+    //     bytesRead = read(clientSock, buffer, BUFSIZ);
+    //     printf("%s", buffer);
+    //     bytesToBeRead -= bytesRead;
+    // }
+    
+    printf("done\n");
+}
 
 int main(int argc, char **argv)
 {
@@ -31,6 +164,9 @@ int main(int argc, char **argv)
         exit(0);
     }
 
+    strcpy(serverDir, argv[1]);
+    validateDir(serverDir);
+
     port = atoi(argv[2]);
 
     listenfd = open_listenfd(port);
@@ -43,15 +179,6 @@ int main(int argc, char **argv)
 
     printf("in server\n");
     return 0;
-}
-
-void handleRequest(int clientSock)
-{
-    char buffer[BUFSIZE];
-    ssize_t n;
-
-    n = read(clientSock, buffer, BUFSIZE);
-    printf("%s\n", buffer);
 }
 
 /* thread routine */

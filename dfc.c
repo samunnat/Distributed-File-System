@@ -5,8 +5,10 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>      /* for fgets */
 #include <strings.h>    /* bzero */
 #include <sys/socket.h>  /* for socket use */
+#include <sys/stat.h>
 #include <unistd.h> /* read, write */
 
 #if defined(__APPLE__)
@@ -19,6 +21,8 @@
 
 #define HASHLEN 32
 #define NUMSERVERS 4
+#define NUMPIECES (NUMSERVERS * 2)
+#define BUFLEN 8192
 
 typedef struct
 {
@@ -38,12 +42,11 @@ typedef struct
 
 typedef struct
 {
-    char fileName[100];
-    int topPieceNum;
-    int topPieceSize;
-    int bottomPieceNum;
-    int bottomPieceSize;
-} FileInfo;
+    char fileName[50];
+    int pieceNum;
+    int fileInd;
+    int bytes;
+} PieceInfo;
 
 bool parseConfigFile(char *dfConFileName, ServerInfo servers[NUMSERVERS], User *user)
 {
@@ -102,7 +105,6 @@ bool connectToServer(ServerInfo *serverInfo)
         printf("Was unable to connect to %s\n", serverInfo->name);
         return false;
     }
-
     return true;
 }
 
@@ -113,16 +115,9 @@ int connectToServers(ServerInfo servers[NUMSERVERS])
     {
         if (!connectToServer(&servers[i]))
         {
-            printf("poo for server %d\n", i+1);
             continue;
         }
         connsMade++;
-
-        char serverBuffer[100];
-        strcpy(serverBuffer, "testing yoooo\n");
-        send(servers[0].sock, serverBuffer, sizeof(serverBuffer), 0);
-
-        close(servers[0].sock);
     }
     return connsMade;
 }
@@ -147,6 +142,28 @@ void getCommand(char *command, char *fileName)
     sscanf(buf, "%s %s\n", command, fileName);
 }
 
+void serializeUser(char *buf, User *user)
+{
+    snprintf(buf, 200, "%s %s \r\n\r\n", user->name, user->password);
+}
+
+bool isValidUser(ServerInfo *serverInfo, User *user, char *buffer)
+{
+    serializeUser(buffer, user);
+    send(serverInfo->sock, buffer, strlen(buffer), 0);
+
+    bzero(buffer, BUFLEN);
+
+    int bytesReceived = recvfrom(serverInfo->sock, buffer, BUFLEN, 0, (struct sockaddr *) &serverInfo->server, &serverInfo->serverLen);
+    //printf("received %d bytes from server %s\n", bytesReceived, serverInfo->name);
+
+    int validUser = 0;
+    sscanf(buffer, "%d \r\n\r\n", &validUser);
+    bzero(buffer, BUFLEN);
+    
+    return validUser == 1;
+}
+
 bool list(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 {
     return false;
@@ -158,18 +175,6 @@ long int getFileSize(FILE* file)
     long int fileSize = ftell(file);
     fseek(file, 0L, SEEK_SET);
     return fileSize;
-}
-
-int getIntFromMD5Hash(char hashStr[HASHLEN])
-{
-    int v1, v2, v3, v4;
-    sscanf( &hashStr[0], "%4x", &v1 );
-    sscanf( &hashStr[8], "%4x", &v2 );
-    sscanf( &hashStr[16], "%4x", &v3 );
-    sscanf( &hashStr[24], "%4x", &v4 );
-
-    int hashInt = v1 ^ v2 ^ v3 ^ v4;
-    return hashInt;
 }
 
 int getMD5HashInt(FILE* fp)
@@ -198,24 +203,83 @@ int getMD5HashInt(FILE* fp)
     {
         sprintf(&hashStr[i*2], "%02x", (unsigned int)digest[i]);
     }
-    printf("%s\n", hashStr);
     
-    return getIntFromMD5Hash(hashStr);
+    int hashInt = digest[MD5_DIGEST_LENGTH - 1] % 4;
+    printf("hashStr: %s\n", hashStr);
+    printf("hashInt: %d\n", hashInt);
+
+    return hashInt;
 }
 
-void assignPieces(int fileHashInt, int pieces[NUMSERVERS * 2])
+void assignPieces(FILE *fp, PieceInfo pieces[NUMPIECES])
 {
+    int fileHashInt = getMD5HashInt(fp);
     for (int i = 0; i < NUMSERVERS; i++)
     {
-        pieces[i*2] = (((((NUMSERVERS - fileHashInt) % NUMSERVERS) + i) % NUMSERVERS) + 1) % (NUMSERVERS+1);
-        pieces[(i*2)+1] = (pieces[i*2] % 4) + 1;
+        pieces[i*2].pieceNum = ((((NUMSERVERS - fileHashInt) % NUMSERVERS) + i) % NUMSERVERS);
+        pieces[(i*2)+1].pieceNum = (pieces[i*2].pieceNum + 1) % NUMSERVERS;
+    }
+}
+
+void getPieceInds(int fileSize, PieceInfo pieces[NUMPIECES])
+{
+    int pieceLen = fileSize / NUMSERVERS;
+    for (int i=0; i < NUMPIECES; i++)
+    {
+        pieces[i].fileInd = pieces[i].pieceNum * pieceLen;
+        pieces[i].bytes = pieces[i].pieceNum != (NUMPIECES - 1) ? pieceLen : fileSize - (pieceLen * (NUMPIECES-1));
+    }
+}
+
+void serializePieceInfo(PieceInfo *pieceInfo, char *buf)
+{
+    snprintf(buf, BUFLEN, "%s %d %d %d \r\n\r\n", pieceInfo->fileName, pieceInfo->pieceNum, pieceInfo->fileInd, pieceInfo->bytes);
+}
+
+void printPieceInfo(PieceInfo *pieceInfo)
+{
+    printf("%s %d %d %d\n", pieceInfo->fileName, pieceInfo->pieceNum, pieceInfo->fileInd, pieceInfo->bytes);
+}
+
+bool sendPieceInfo(int serverSock, PieceInfo *pieceInfo, char *buf)
+{
+    serializePieceInfo(pieceInfo, buf);
+    bool allBytesSent = write(serverSock, buf, strlen(buf)) == strlen(buf);
+    bzero(buf, BUFLEN);
+    return allBytesSent;
+}
+
+void XOR(char *string, char *key)
+{
+    int keyLen = strlen(key);
+    for (int i = 0; i < strlen(string); i++)
+    {
+        string[i] = string[i] ^ key[i % keyLen];
+    }
+}
+
+bool sendPiece(FILE *fp, int serverSock, PieceInfo *pieceInfo, char *buffer)
+{
+    if (!sendPieceInfo(serverSock, pieceInfo, buffer))
+    {
+        return false;
     }
 
-    for (int i = 0; i < 8; i++)
-    {
-        printf("%d ", pieces[i]);
-    }
-    printf("\n");
+    // fseek(fp, pieceInfo->fileInd, SEEK_SET);
+
+    // int bytesRead = 0;
+    // int bytesToBeRead = pieceInfo->bytes;
+
+    // int readBufferSize = fmin(bytesToBeRead, BUFLEN);
+    // while ( bytesToBeRead > 0 && (bytesRead = fread(buffer, 1, readBufferSize, fp)) > 0)
+    // {
+    //     write(serverSock, buffer, bytesRead);
+    //     bytesToBeRead -= bytesRead;
+    //     readBufferSize = fmin(bytesToBeRead, BUFLEN);
+    //     bzero(buffer, BUFLEN);
+    // }
+    
+    return true;
 }
 
 bool put(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
@@ -227,10 +291,46 @@ bool put(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
         return false;
     }
 
-    int pieces[NUMSERVERS * 2];
-    int fileHashInt = getMD5HashInt(fp);
-    assignPieces(fileHashInt, pieces);
+    char buffer[BUFLEN];
 
+    int totalPieces = NUMSERVERS * 2;
+    PieceInfo pieces[totalPieces];
+    for (int i = 0; i < totalPieces; i++)
+    {
+        strcpy(pieces[i].fileName, fileName);
+    }
+
+    assignPieces(fp, pieces);
+    int fileSize = getFileSize(fp);
+    getPieceInds(fileSize, pieces);
+
+    for (int i = 0; i < totalPieces; i++)
+    {
+        printPieceInfo(&pieces[i]);
+    }
+
+    for (int i = 0; i < NUMSERVERS; i++)
+    {
+        if (!isValidUser(&servers[i], user, buffer))
+        {
+            printf("Invalid user credentials to server %d\n", i);
+            continue;
+        }
+        
+        PieceInfo firstPiece = pieces[i * 2];
+        if (!sendPiece(fp, servers[i].sock, &firstPiece, buffer))
+        {
+            printf("failed to send piece %d of %s to server %d\n", i*2, fileName, i);
+        }
+
+        // PieceInfo secondPiece = pieces[(i*2]+1)];
+        // if (!sendPiece(fp, servers[i].sock, &firstPiece, buffer))
+        // {
+        //     printf("failed to send piece %d of %s to server %d\n", i, fileName, currentServer);
+        // }
+    }
+
+    fclose(fp);
     return false;
 }
 
@@ -239,14 +339,16 @@ bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
     return false;
 }
 
+void closeServerSockets(ServerInfo servers[NUMSERVERS])
+{
+    for (int i = 0; i < NUMSERVERS; i++)
+    {
+        close(servers[i].sock);
+    }
+}
+
 int main(int argc, char **argv)
 {
-    int assignments[8];
-    assignPieces(0, assignments);
-    assignPieces(1, assignments);
-    assignPieces(2, assignments);
-    assignPieces(3, assignments);
-    return 0;
     if (argc < 2) 
     {
         fprintf(stderr, "usage: %s <dfc.conf>\n", argv[0]);
@@ -258,26 +360,20 @@ int main(int argc, char **argv)
 
     if (!parseConfigFile(argv[1], servers, &user))
     {
-        printf("Unable to parse %s file", argv[1]);
+        printf("Unable to parse %s file\n", argv[1]);
         return -1;
     }
     
-    if (connectToServers(servers) != NUMSERVERS)
-    {
-        printf("poo\n");
-    }
-
+    int serversAvailable;
     char command[10];
     char fileName[50];
     while (1)
     {
+        serversAvailable = connectToServers(servers);
+        printf("Connected to %d/%d servers\n", serversAvailable, NUMSERVERS);
         getCommand(command, fileName);
-
-        if (strcmp(command, "exit") == 0)
-        {
-            return 0;
-        }
-        else if (strcmp(command, "list") == 0)
+        
+        if (strcmp(command, "list") == 0)
         {
             if (!list(servers, &user, fileName))
             {
@@ -297,6 +393,12 @@ int main(int argc, char **argv)
             {
                 printf("'get %s' failed\n", fileName);
             }
+        }
+        
+        closeServerSockets(servers);
+        if (strcmp(command, "exit") == 0)
+        {
+            return 0;
         }
         printf("\n");
     }
