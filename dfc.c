@@ -33,6 +33,14 @@ typedef struct
 
 typedef struct
 {
+    char fileName[50];
+    int pieceNum;
+    int fileInd;
+    int bytes;
+} PieceInfo;
+
+typedef struct
+{
     char name[10];
     char IP[45];
     int port;
@@ -40,14 +48,6 @@ typedef struct
     socklen_t serverLen;
     int sock;
 } ServerInfo;
-
-typedef struct
-{
-    char fileName[50];
-    int pieceNum;
-    int fileInd;
-    int bytes;
-} PieceInfo;
 
 bool parseConfigFile(char *dfConFileName, ServerInfo servers[NUMSERVERS], User *user)
 {
@@ -143,19 +143,18 @@ void getCommand(char *command, char *fileName)
     sscanf(buf, "%s %s\n", command, fileName);
 }
 
-void serializeUser(char *buf, User *user)
+void serializeRequest(char *buf, User *user, char *command)
 {
-    snprintf(buf, 200, "%s %s \r\n\r\n", user->name, user->password);
+    snprintf(buf, 200, "%s %s %s \r\n\r\n", user->name, user->password, command);
 }
 
-bool isValidUser(ServerInfo *serverInfo, User *user, char *buffer)
+bool isValidRequest(int serverSock, User *user, char *command, char *buffer)
 {
-    serializeUser(buffer, user);
-    send(serverInfo->sock, buffer, strlen(buffer), 0);
+    serializeRequest(buffer, user, command);
+    write(serverSock, buffer, strlen(buffer));
 
     bzero(buffer, BUFLEN);
-
-    int bytesReceived = recvfrom(serverInfo->sock, buffer, BUFLEN, 0, (struct sockaddr *) &serverInfo->server, &serverInfo->serverLen);
+    int bytesReceived = recv(serverSock, buffer, BUFLEN, 0);
     //printf("received %d bytes from server %s\n", bytesReceived, serverInfo->name);
 
     int validUser = 0;
@@ -259,31 +258,49 @@ void XOR(char *string, char *key)
     }
 }
 
-bool sendPiece(FILE *fp, int serverSock, PieceInfo *pieceInfo, char *buffer)
+bool sendPiece(FILE *fp, ServerInfo *server, User *user, PieceInfo *pieceInfo, char *buffer)
 {
-    if (!sendPieceInfo(serverSock, pieceInfo, buffer))
+    if (!connectToServer(server))
+    {
+        printf("unable to connect to %s\n", server->name);
+        return false;
+    }
+    if (!isValidRequest(server->sock, user, "put", buffer))
+    {
+        printf("Invalid user credentials to %s\n", server->name);
+        return false;
+    }
+    if (!sendPieceInfo(server->sock, pieceInfo, buffer))
     {
         return false;
     }
-
     fseek(fp, pieceInfo->fileInd, SEEK_SET);
 
     int bytesRead = 0;
     int bytesToBeRead = pieceInfo->bytes;
-
     int readBufferSize = fmin(bytesToBeRead, BUFLEN);
-    sleep(1);
+    
+    if (recv(server->sock, buffer, 1, 0) != 1)
+    {
+        printf("no confirmation received\n");
+        close(server->sock);
+        return false;
+    }
+
     while ( bytesToBeRead > 0 && (bytesRead = fread(buffer, 1, readBufferSize, fp)) > 0)
     {
-        int sentBytes = write(serverSock, buffer, bytesRead);
-        printf("sent %d bytes for piece %d\n", sentBytes, pieceInfo->pieceNum);;
-
+        int sentBytes = write(server->sock, buffer, bytesRead);
+        printf("sent %d bytes for piece %d\n", sentBytes, pieceInfo->pieceNum);
         bytesToBeRead -= bytesRead;
-
+        
         readBufferSize = fmin(bytesToBeRead, BUFLEN);
         bzero(buffer, BUFLEN);
     }
-    
+    // char *piece = calloc(pieceInfo->bytes, 0);
+    // int bytesRead = fread(piece, 1, pieceInfo->bytes, fp);
+    // write(serverSock, piece, bytesRead);
+    // free(piece);
+    close(server->sock);
     return true;
 }
 
@@ -315,24 +332,18 @@ bool put(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
     }
 
     for (int i = 0; i < NUMSERVERS; i++)
-    {
-        if (!isValidUser(&servers[i], user, buffer))
-        {
-            printf("Invalid user credentials to server %d\n", i);
-            continue;
-        }
-        
+    {   
         PieceInfo firstPiece = pieces[i * 2];
-        if (!sendPiece(fp, servers[i].sock, &firstPiece, buffer))
+        if (!sendPiece(fp, &servers[i], user, &firstPiece, buffer))
         {
             printf("failed to send piece %d of %s to server %d\n", i*2, fileName, i);
         }
 
-        // PieceInfo secondPiece = pieces[(i*2]+1)];
-        // if (!sendPiece(fp, servers[i].sock, &firstPiece, buffer))
-        // {
-        //     printf("failed to send piece %d of %s to server %d\n", i, fileName, currentServer);
-        // }
+        PieceInfo secondPiece = pieces[(i*2)+1];
+        if (!sendPiece(fp, &servers[i], user, &secondPiece, buffer))
+        {
+            printf("failed to send piece %d of %s to server %d\n", (i*2)+1, fileName, i);
+        }
     }
 
     fclose(fp);
@@ -369,13 +380,10 @@ int main(int argc, char **argv)
         return -1;
     }
     
-    int serversAvailable;
     char command[10];
     char fileName[50];
     while (1)
     {
-        serversAvailable = connectToServers(servers);
-        printf("Connected to %d/%d servers\n", serversAvailable, NUMSERVERS);
         getCommand(command, fileName);
         
         if (strcmp(command, "list") == 0)
@@ -399,8 +407,6 @@ int main(int argc, char **argv)
                 printf("'get %s' failed\n", fileName);
             }
         }
-        
-        closeServerSockets(servers);
         if (strcmp(command, "exit") == 0)
         {
             return 0;

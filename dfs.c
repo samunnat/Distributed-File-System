@@ -53,9 +53,9 @@ void validateUserDir(char *userName, char *userDirName)
     validateDir(userDirName);
 }
 
-void deserializeUser(char *buf, User *user)
+void parseRequest(char *buf, User *user, char *command)
 {
-    sscanf(buf, "%s %s \r\n\r\n", user->name, user->password);
+    sscanf(buf, "%s %s %s \r\n\r\n", user->name, user->password, command);
     bzero(buf, BUFLEN);
 }
 
@@ -113,6 +113,8 @@ void getPieceFileName(char *userDir, PieceInfo *pieceInfo ,char *pieceFileName)
 
 bool handlePut(int clientSock, User *user, char *userDir, char *buffer)
 {
+    printf("trying to handle put\n");
+
     PieceInfo pieceInfo;
     read(clientSock, buffer, BUFLEN);
     deserializePieceInfo(buffer, &pieceInfo);
@@ -127,7 +129,13 @@ bool handlePut(int clientSock, User *user, char *userDir, char *buffer)
     {
         return false;
     }
-    
+
+    // char *piece = calloc(pieceInfo.bytes, 0);
+    // int received_bytes = read(clientSock, piece, pieceInfo.bytes);
+    // fwrite(piece, 1, received_bytes, pieceFile);
+    // free(piece)
+    send(clientSock, "1", 1, 0);
+
     int received_bytes = 0;
     while ((received_bytes = read(clientSock, buffer, BUFLEN)) > 0) 
     {
@@ -136,7 +144,20 @@ bool handlePut(int clientSock, User *user, char *userDir, char *buffer)
         
         bzero(buffer, BUFLEN);
     }
+
     fclose(pieceFile);
+    return true;
+}
+
+bool handleGet(int clientSock, User *user, char *userDir, char *buffer)
+{
+    printf("trying to handle get\n");
+    return true;
+}
+
+bool handleList(int clientSock, User *user, char *userDir, char *buffer)
+{
+    printf("trying to handle list\n");
     return true;
 }
 
@@ -145,20 +166,37 @@ void handleRequest(int clientSock)
     char buffer[BUFLEN];
     
     User user;
+    char command[10];
+
     read(clientSock, buffer, BUFLEN);
-    deserializeUser(buffer, &user);
+    parseRequest(buffer, &user, command);
 
     bool isUserValid = isVerifiedUser(&user);
     printf("%s is %d\n", user.name, isUserValid);
+    if (!isUserValid)
+    {
+        return;
+    }
 
-    snprintf(buffer, BUFLEN, "%d \r\n\r\n", isUserValid);
-    send(clientSock, buffer, strlen(buffer), 0);
-    
     char userDir[20];
     validateUserDir(user.name, userDir);
 
-    handlePut(clientSock, &user, userDir, buffer);
-    
+    snprintf(buffer, BUFLEN, "%d \r\n\r\n", isUserValid);
+    send(clientSock, buffer, strlen(buffer), 0);
+
+    if (strcmp(command, "put") == 0)
+    {
+        handlePut(clientSock, &user, userDir, buffer);
+    }
+    else if(strcmp(command, "get") == 0)
+    {
+        handleGet(clientSock, &user, userDir, buffer);
+    }
+    else if(strcmp(command, "list") == 0)
+    {
+        handleList(clientSock, &user, userDir, buffer);
+    }
+
     printf("done\n");
 }
 
@@ -209,16 +247,25 @@ void * thread(void * vargp)
  */
 int open_listenfd(int port) 
 {
-    int listenfd, optval=1;
+    int listenfd, optVal;
     struct sockaddr_in proxyaddr;
   
     /* Create a socket descriptor */
     if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
         return -1;
+    
+    struct timeval t;    
+    t.tv_sec = 1;
+    t.tv_usec = 0;
 
     /* Eliminates "Address already in use" error from bind. */
-    if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, 
-                   (const void *)&optval , sizeof(int)) < 0)
+    if (setsockopt(
+                listenfd, 
+                SOL_SOCKET, 
+                SO_REUSEADDR,
+                (const void *)&optVal, 
+                sizeof(int)
+            ) < 0)
         return -1;
 
     /* listenfd will be an endpoint for all requests to port
