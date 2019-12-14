@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -9,6 +10,7 @@
 #include <string.h>      /* for fgets */
 #include <strings.h>     /* for bzero, bcopy */
 #include <sys/socket.h>  /* for socket use */
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -155,9 +157,60 @@ bool handleGet(int clientSock, User *user, char *userDir, char *buffer)
     return true;
 }
 
-bool handleList(int clientSock, User *user, char *userDir, char *buffer)
+void getFolderContents(char *userDir, char *buffer)
+{
+    
+}
+
+int getFileSize(char *fileName)
+{
+    struct stat st;
+    stat(fileName, &st);
+    return st.st_size;
+}
+
+bool handleList(int clientSock, User *user, char *userDirName, char *buffer)
 {
     printf("trying to handle list\n");
+
+    struct dirent *de;
+    DIR *userDir = opendir(userDirName);
+    de = readdir(userDir);  // .
+    de = readdir(userDir);  // ..
+    
+    char fullFileName[50];
+    char fileName[50];
+    char extensionWithPieceNum[10];
+    char extension[10];
+    while((de = readdir(userDir)) != NULL)
+    {
+        char *fNameAfterDot = de->d_name + 1;
+        sscanf(fNameAfterDot, "%[^.].%s", fileName, extensionWithPieceNum);
+
+        int pieceNum;
+        sscanf(extensionWithPieceNum, "%[^.].%d", extension, &pieceNum);
+        snprintf(fileName + strlen(fileName), strlen(fileName), ".%s", extension);
+
+        snprintf(fullFileName, 50, "%s/%s", userDirName, de->d_name);
+        
+        int fileSize = getFileSize(fullFileName);
+
+        printf("%s %d %d \n", fileName, pieceNum, fileSize);
+        snprintf(buffer + strlen(buffer), BUFLEN, "%s %d %d \n", fileName, pieceNum, fileSize);
+
+        bzero(fullFileName, 50);
+        bzero(fileName, 50);
+        bzero(extensionWithPieceNum, 10);
+        bzero(extension, 10);
+    }
+    closedir(userDir);
+    
+    if (strlen(buffer) == 0)
+    {
+        strcat(buffer, "Empty");
+    }
+
+    send(clientSock, buffer, strlen(buffer), 0);
     return true;
 }
 
@@ -183,6 +236,7 @@ void handleRequest(int clientSock)
 
     snprintf(buffer, BUFLEN, "%d \r\n\r\n", isUserValid);
     send(clientSock, buffer, strlen(buffer), 0);
+    bzero(buffer, BUFLEN);
 
     if (strcmp(command, "put") == 0)
     {

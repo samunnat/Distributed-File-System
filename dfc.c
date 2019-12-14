@@ -164,8 +164,62 @@ bool isValidRequest(int serverSock, User *user, char *command, char *buffer)
     return validUser == 1;
 }
 
+// bool parseServerList(buffer, PieceNode pieceNode)
+// {
+//     char *pieceNodeInfo = NULL;
+//     ssize_t len = 0;
+//     pieceNodeInfo = strtok(buffer, "\n");
+//     while (pieceNodeInfo != NULL)
+//     {
+//         pieceNode->fileName = calloc(strlen(pieceNodeInfo), 0);
+//         strcpy(pieceNode->fileName, pieceNodeInfo);
+//         pieceNode->pieceNum = -1;
+//         pieceNode->size = -1;
+//     }
+// }
+
+// bool getFilePieceList(ServerInfo servers[NUMSERVERS], User *user, char *fileName, PieceNode pieceList[NUMSERVERS])
+bool getFilePieceList(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
+{
+    char buffer[BUFLEN];
+    
+    for (int i = 0; i < NUMSERVERS; i++)
+    {
+        if (!connectToServer(&servers[i]))
+        {
+            printf("unable to connect to %s\n", servers[i].name);
+            return false;
+        }
+        if (!isValidRequest(servers[i].sock, user, "list", buffer))
+        {
+            printf("Invalid user credentials to %s\n", servers[i].name);
+            close(servers[i].sock);
+            return false;
+        }
+
+        recv(servers[i].sock, buffer, BUFLEN, 0);
+        
+        printf("%s", buffer);
+
+        printf("%s done\n", servers[i].name);
+        close(servers[i].sock);
+    }
+    return true;
+}
+
+// void printPieceList(PieceNode pieceList[NUMSERVERS])
+// {
+//     printf("poo\n");
+// }
+
 bool list(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 {
+    char buf[BUFLEN];
+    //PieceNode pieceList[NUMSERVERS];
+
+    //getFilePieceList(servers, user, fileName, pieceList);
+    getFilePieceList(servers, user, fileName);
+    //printPieceList(pieceList);
     return false;
 }
 
@@ -290,7 +344,7 @@ bool sendPiece(FILE *fp, ServerInfo *server, User *user, PieceInfo *pieceInfo, c
     while ( bytesToBeRead > 0 && (bytesRead = fread(buffer, 1, readBufferSize, fp)) > 0)
     {
         int sentBytes = write(server->sock, buffer, bytesRead);
-        printf("sent %d bytes for piece %d\n", sentBytes, pieceInfo->pieceNum);
+        //printf("sent %d bytes for piece %d\n", sentBytes, pieceInfo->pieceNum);
         bytesToBeRead -= bytesRead;
         
         readBufferSize = fmin(bytesToBeRead, BUFLEN);
@@ -326,10 +380,10 @@ bool put(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
     int fileSize = getFileSize(fp);
     getPieceInds(fileSize, pieces);
 
-    for (int i = 0; i < totalPieces; i++)
-    {
-        printPieceInfo(&pieces[i]);
-    }
+    // for (int i = 0; i < totalPieces; i++)
+    // {
+    //     printPieceInfo(&pieces[i]);
+    // }
 
     for (int i = 0; i < NUMSERVERS; i++)
     {   
