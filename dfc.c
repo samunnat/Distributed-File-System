@@ -517,9 +517,18 @@ FileInfo* getFileInfo(char *fileName, struct FileInfo** head)
     return cursor;
 }
 
-void writePiece(ServerInfo *server, int pieceNum, FILE *fp)
+void writePiece(int serverSock, char* buffer, FILE *fp)
 {
-    printf("Asking %s for piece %d\n", server->name, pieceNum);
+    send(serverSock, "1", 1, 0);
+
+    int received_bytes = 0;
+    while ((received_bytes = read(serverSock, buffer, BUFLEN)) > 0) 
+    {
+        printf("received %d bytes\n", received_bytes);
+        fwrite(buffer, 1, received_bytes, fp);
+        
+        bzero(buffer, BUFLEN);
+    }
 }
 
 bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
@@ -544,6 +553,13 @@ bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
     
     FILE *fp = fopen(downloadFileName, "wb+");
     
+    char buffer[BUFLEN];
+
+    PieceInfo pieceInfo;
+    strcpy(pieceInfo.fileName, fileName);
+    pieceInfo.fileInd = -1;
+    pieceInfo.bytes = -1;
+
     for (int i = 0; i < NUMSERVERS; i++)
     {
         int serverInd = fileInfo->pieceLocs[i*2] == -1 ? fileInfo->pieceLocs[(i*2)+1] : fileInfo->pieceLocs[i*2];
@@ -552,7 +568,29 @@ bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
             printf("piece %d doesn't exist anywhere\n", i);
             continue;
         }
-        writePiece(&servers[serverInd], i, fp);
+
+        if (!connectToServer(&servers[serverInd]))
+        {
+            continue;
+        }
+
+        if (!isValidRequest(servers[serverInd].sock, user, "get", buffer))
+        {
+            printf("Invalid user credentials to %s\n", servers[serverInd].name);
+            close(servers[serverInd].sock);
+            return false;
+        }
+
+        pieceInfo.pieceNum = i;
+        if (!sendPieceInfo(servers[serverInd].sock, &pieceInfo, buffer))
+        {
+            printf("Invalid user credentials to %s\n", servers[serverInd].name);
+            close(servers[serverInd].sock);
+            return false;
+        }
+        
+        writePiece(servers[serverInd].sock, buffer, fp);
+        close(servers[serverInd].sock);
     }
     
     fclose(fp);

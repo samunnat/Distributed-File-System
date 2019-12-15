@@ -195,12 +195,15 @@ bool handleGet(int clientSock, User *user, char *userDir, char *buffer)
     FILE *pieceFile;
     char pieceFileName[50];
     getPieceFileName(userDir, &pieceInfo, pieceFileName);
+    printf("%s\n", pieceFileName);
 
     pieceFile = fopen(pieceFileName, "rb");
     if (!pieceFile)
     {
         return false;
     }
+
+    printf("found %s\n", pieceFileName);
     
     return sendPiece(clientSock, buffer, pieceFile, getFileSize(pieceFileName));
 }
