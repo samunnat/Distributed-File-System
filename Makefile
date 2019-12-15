@@ -12,5 +12,6 @@ dfs:
 clean: 
 	$(RM) dfc dfs
 	$(RM) -r *.dSYM
+	$(RM) -r downloads
 	$(RM) -r Client
 	$(RM) -r DFS*

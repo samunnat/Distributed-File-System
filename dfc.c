@@ -25,6 +25,7 @@
 #define NUMPIECES (NUMSERVERS * 2)
 #define BUFLEN 8192
 #define FILELIMIT 20
+#define DOWNLOADSDIR "downloads"
 
 typedef struct
 {
@@ -53,8 +54,8 @@ typedef struct
 typedef struct FileInfo
 {
     char *fileName;
-    int pieceLocs[NUMSERVERS*2];
-    int pieceSizes[NUMSERVERS];
+    int *pieceLocs;
+    int *pieceSizes;
     struct FileInfo *next;
 } FileInfo;
 
@@ -118,28 +119,6 @@ bool connectToServer(ServerInfo *serverInfo)
     return true;
 }
 
-int connectToServers(ServerInfo servers[NUMSERVERS])
-{
-    int connsMade = 0;
-    for (int i = 0; i < NUMSERVERS; i++)
-    {
-        if (!connectToServer(&servers[i]))
-        {
-            continue;
-        }
-        connsMade++;
-    }
-    return connsMade;
-}
-
-void closeServerSockets(ServerInfo servers[NUMSERVERS])
-{
-    for (int i = 0; i < NUMSERVERS; i++)
-    {
-        close(servers[i].sock);
-    }
-}
-
 void printCommands() 
 {
     printf("Please enter one of the following commands: \n");
@@ -183,6 +162,8 @@ bool isValidRequest(int serverSock, User *user, char *command, char *buffer)
 
 void initializeFileInfo(FileInfo *fileInfo)
 {
+    fileInfo->pieceLocs = malloc( (NUMSERVERS * 2) * sizeof(*fileInfo->pieceLocs));
+    fileInfo->pieceSizes = malloc( NUMSERVERS * sizeof(*fileInfo->pieceLocs));
     for (int i = 0; i < NUMSERVERS*2; i++)
     {
         fileInfo->pieceLocs[i] = -1;
@@ -312,19 +293,21 @@ void printFileInfoList(struct FileInfo** head)
     }
 }
 
-void freeFileInfoList(struct FileInfo** head)
+void freeFileInfoList(FileInfo* head)
 {
-    // FileInfo *tmp;
-    // while (fileInfo != NULL)
-    // {
-    //     tmp = fileInfo;
-    //     fileInfo = fileInfo->next;
-    //     if (tmp->fileName != NULL)
-    //     {
-    //         free(tmp->fileName);
-    //     }
-    //     free(tmp);
-    // }
+    FileInfo *tmp;
+    while (head != NULL)
+    {
+        tmp = head;
+        head = head->next;
+        if (tmp->fileName != NULL)
+        {
+            free(tmp->fileName);
+        }
+        free(tmp->pieceLocs);
+        free(tmp->pieceSizes);
+        free(tmp);
+    }
 }
 
 bool list(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
@@ -335,7 +318,7 @@ bool list(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 
     printFileInfoList(&head);
     
-    freeFileInfoList(&head);
+    freeFileInfoList(head);
     return true;
 }
 
@@ -520,9 +503,9 @@ bool put(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
     return true;
 }
 
-FileInfo* getFileInfo(char *fileName, FileInfo *fileList)
+FileInfo* getFileInfo(char *fileName, struct FileInfo** head)
 {
-    FileInfo* cursor = fileList;
+    FileInfo* cursor = *head;
     while (cursor != NULL)
     {
         if (strcmp(cursor->fileName, fileName) == 0)
@@ -536,21 +519,32 @@ FileInfo* getFileInfo(char *fileName, FileInfo *fileList)
 
 bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 {
-    // FileInfo *fileInfoList = (FileInfo *) malloc(sizeof(FileInfo));
-    // getFileInfoList(servers, user, fileName, fileInfoList);
+    struct FileInfo *head = NULL;
+    getFileInfoList(servers, user, fileName, &head);
 
-    // FileInfo *fileInfo = getFileInfo(fileName, fileInfoList);
+    FileInfo *fileInfo = getFileInfo(fileName, &head);
 
-    // if (fileInfo == NULL)
-    // {
-    //     printf("Didn't find %s\n", fileName);
-    // }
+    if (fileInfo == NULL)
+    {
+        printf("Didn't find %s\n", fileName);
+    }
+    printf("%s\n", fileInfo->fileName);
+    for (int i = 0; i < NUMSERVERS*2; i++)
+    {
+        printf("%d %d %d\n", i, fileInfo->pieceLocs[i], fileInfo->pieceSizes[i/2]);
+    }
 
-    // for (int i = 0; i < NUMSERVERS; i++)
-    // {
+    int totalFileSize = 0;
+    return true;
+}
 
-    // }
-    return false;
+void validateDir(char *dirName)
+{
+    struct stat st = {0};
+
+    if (stat(dirName, &st) == -1) {
+        mkdir(dirName, 0700);
+    }
 }
 
 int main(int argc, char **argv)
@@ -563,6 +557,8 @@ int main(int argc, char **argv)
 
     ServerInfo servers[NUMSERVERS];
     User user;
+
+    validateDir(DOWNLOADSDIR);
 
     if (!parseConfigFile(argv[1], servers, &user))
     {
