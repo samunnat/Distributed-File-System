@@ -189,36 +189,46 @@ void initializeFileInfo(FileInfo *fileInfo)
     }
 }
 
-void loadFileInfo(char *line, int serverInd, FileInfo *fileInfo)
+bool loadFileInfo(char *line, int serverInd, FileInfo *fileInfo)
 {
     char fileName[50];
     int pieceNum = -1;
     int pieceSize = -1;
     sscanf(line, "%s %d %d", fileName, &pieceNum, &pieceSize);
-
-    printf("heree\n");
+    //printf("%s %d %d\n", fileName, pieceNum, pieceSize);
+    
     FileInfo *crawl = fileInfo;
-    while ( crawl != NULL && strcmp(crawl->fileName, fileName) != 0)
+    while ( crawl != NULL && (strlen(crawl->fileName) != 0) && strcmp(crawl->fileName, fileName) != 0)
     {
         crawl = crawl->next;
     }
     if (crawl == NULL)
     {
-        crawl = malloc(sizeof(FileInfo));
-        initializeFileInfo(crawl);
-        strcpy(crawl->fileName, fileName);
+        printf("making new\n");
+        crawl = (FileInfo*)malloc(sizeof(FileInfo));
+        crawl->next = fileInfo->next;
+        fileInfo->next = crawl;
+
     }
-    int pieceInd = (pieceNum-1)*2;
-    if (crawl->pieceSizes[pieceInd] == -1)
+    if (strlen(crawl->fileName)==0)
     {
-        crawl->pieceSizes[pieceInd] = serverInd;
+        initializeFileInfo(crawl);
+        
+        strcpy(crawl->fileName, fileName);
+        printf("initialized FileInfo for %s\n", crawl->fileName);
+    }
+
+    int pieceInd = (pieceNum-1)*2;
+    if (crawl->pieceLocs[pieceInd] == -1)
+    {
+        crawl->pieceLocs[pieceInd] = serverInd;
     }
     else
     {
-        printf("server %d has piece %d\n", crawl->pieceSizes[pieceNum], pieceNum);
-        crawl->pieceSizes[pieceInd+1] = serverInd;
+        crawl->pieceLocs[pieceInd+1] = serverInd;
     }
     crawl->pieceSizes[pieceNum-1] = pieceSize;
+    return true;
 }
 
 bool parseFileInfoList(char *buffer, int serverInd, FileInfo *fileInfo)
@@ -252,7 +262,7 @@ bool getFileInfoList(ServerInfo servers[NUMSERVERS], User *user, char *fileName,
 
         recv(servers[i].sock, buffer, BUFLEN, 0);
         
-        if (strcmp(buffer, "Empty") == 0)
+        if (strcmp(buffer, "Empty") == 0 || strlen(buffer) == 0)
         {
             printf("server %s got nothing\n", servers[i].name);
         }
@@ -267,27 +277,60 @@ bool getFileInfoList(ServerInfo servers[NUMSERVERS], User *user, char *fileName,
     return true;
 }
 
+bool allPiecesAvailable(FileInfo *fi)
+{
+    bool pieces[NUMSERVERS];
+    for (int i = 0; i < NUMSERVERS; i++)
+    {
+        pieces[i] = fi->pieceLocs[i*2] != -1 || fi->pieceLocs[(i*2)+1] != -1;
+    }
+    for (int i = 0; i < NUMSERVERS; i++)
+    {
+        if (!pieces[i])
+        {
+            //printf("piece %d missing for %s\n", i, fi->fileName);
+            return false;
+        }
+    }
+    return true;
+}
+
 void printFileInfoList(FileInfo *fi)
 {
-
+    FileInfo *crawl = fi;
+    while (crawl != NULL)
+    {
+        printf("- %s", crawl->fileName);
+        bool isFileComplete = allPiecesAvailable(crawl);
+        if (!isFileComplete)
+        {
+            printf(" [incomplete]");
+        }
+        printf("\n");
+        crawl = crawl->next;
+    }
 }
 
 void freeFileInfoList(FileInfo *fileInfo)
 {
-
+    FileInfo *tmp;
+    while (fileInfo != NULL)
+    {
+        tmp = fileInfo;
+        fileInfo = fileInfo->next;
+        free(tmp);
+    }
 }
 
 bool list(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 {
-    char buf[BUFLEN];
-    //PieceNode pieceList[NUMSERVERS];
-    //getFilePieceList(servers, user, fileName, pieceList);'
-    FileInfo *fileInfo = NULL;
-
+    FileInfo *fileInfo = (FileInfo *) malloc(sizeof(FileInfo));
     getFileInfoList(servers, user, fileName, fileInfo);
+
     printFileInfoList(fileInfo);
+    
     freeFileInfoList(fileInfo);
-    return false;
+    return true;
 }
 
 long int getFileSize(FILE* file)

@@ -213,6 +213,7 @@ bool handleList(int clientSock, User *user, char *userDirName, char *buffer)
     }
 
     send(clientSock, buffer, strlen(buffer), 0);
+    printf("%s\n", buffer);
     return true;
 }
 
