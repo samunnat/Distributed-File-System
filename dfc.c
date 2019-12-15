@@ -517,6 +517,11 @@ FileInfo* getFileInfo(char *fileName, struct FileInfo** head)
     return cursor;
 }
 
+void writePiece(ServerInfo *server, int pieceNum, FILE *fp)
+{
+    printf("Asking %s for piece %d\n", server->name, pieceNum);
+}
+
 bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 {
     struct FileInfo *head = NULL;
@@ -534,7 +539,23 @@ bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
         printf("%d %d %d\n", i, fileInfo->pieceLocs[i], fileInfo->pieceSizes[i/2]);
     }
 
-    int totalFileSize = 0;
+    char downloadFileName[50];
+    snprintf(downloadFileName, 50, "%s/%s", DOWNLOADSDIR, fileName);
+    
+    FILE *fp = fopen(downloadFileName, "wb+");
+    
+    for (int i = 0; i < NUMSERVERS; i++)
+    {
+        int serverInd = fileInfo->pieceLocs[i*2] == -1 ? fileInfo->pieceLocs[(i*2)+1] : fileInfo->pieceLocs[i*2];
+        if (serverInd == -1)
+        {
+            printf("piece %d doesn't exist anywhere\n", i);
+            continue;
+        }
+        writePiece(&servers[serverInd], i, fp);
+    }
+    
+    fclose(fp);
     return true;
 }
 
