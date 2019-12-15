@@ -52,7 +52,7 @@ typedef struct
 
 typedef struct FileInfo
 {
-    char fileName[50];
+    char *fileName;
     int pieceLocs[NUMSERVERS*2];
     int pieceSizes[NUMSERVERS];
     struct FileInfo *next;
@@ -112,7 +112,7 @@ bool connectToServer(ServerInfo *serverInfo)
     int conn = connect(serverInfo->sock, (struct sockaddr *) &serverInfo->server, serverInfo->serverLen);
     if (conn == -1)
     {
-        printf("Was unable to connect to %s\n", serverInfo->name);
+        //printf("Was unable to connect to %s\n", serverInfo->name);
         return false;
     }
     return true;
@@ -189,33 +189,34 @@ void initializeFileInfo(FileInfo *fileInfo)
     }
 }
 
-bool loadFileInfo(char *line, int serverInd, FileInfo *fileInfo)
+bool loadFileInfo(char *line, int serverInd, struct FileInfo** head)
 {
     char fileName[50];
     int pieceNum = -1;
     int pieceSize = -1;
     sscanf(line, "%s %d %d", fileName, &pieceNum, &pieceSize);
     //printf("%s %d %d\n", fileName, pieceNum, pieceSize);
-    
-    FileInfo *crawl = fileInfo;
-    while ( crawl != NULL && (strlen(crawl->fileName) != 0) && strcmp(crawl->fileName, fileName) != 0)
+
+    FileInfo *crawl = *head;
+    while ( crawl != NULL && strcmp(crawl->fileName, fileName) != 0)
     {
         crawl = crawl->next;
     }
+    
     if (crawl == NULL)
     {
-        printf("making new\n");
-        crawl = (FileInfo*)malloc(sizeof(FileInfo));
-        crawl->next = fileInfo->next;
-        fileInfo->next = crawl;
+        crawl = (FileInfo*) malloc(sizeof(FileInfo));
 
+        crawl->next = (*head);
+
+        (*head) = crawl;
     }
-    if (strlen(crawl->fileName)==0)
+    
+    if (crawl->fileName == NULL)
     {
         initializeFileInfo(crawl);
-        
+        crawl->fileName = malloc(strlen(fileName)+1);
         strcpy(crawl->fileName, fileName);
-        printf("initialized FileInfo for %s\n", crawl->fileName);
     }
 
     int pieceInd = (pieceNum-1)*2;
@@ -231,19 +232,19 @@ bool loadFileInfo(char *line, int serverInd, FileInfo *fileInfo)
     return true;
 }
 
-bool parseFileInfoList(char *buffer, int serverInd, FileInfo *fileInfo)
+bool parseFileInfoList(char *buffer, int serverInd, struct FileInfo** head)
 {
     char * line = strtok(strdup(buffer), "\n");
     while(line) {
         //printf("%s\n", line);
-        loadFileInfo(line, serverInd, fileInfo);
+        loadFileInfo(line, serverInd, head);
         line  = strtok(NULL, "\n");
     }
     return true;
 }
 
 // bool getFilePieceList(ServerInfo servers[NUMSERVERS], User *user, char *fileName, PieceNode pieceList[NUMSERVERS])
-bool getFileInfoList(ServerInfo servers[NUMSERVERS], User *user, char *fileName, FileInfo *fileInfo)
+bool getFileInfoList(ServerInfo servers[NUMSERVERS], User *user, char *fileName, FileInfo** head)
 {
     char buffer[BUFLEN];
     
@@ -268,16 +269,16 @@ bool getFileInfoList(ServerInfo servers[NUMSERVERS], User *user, char *fileName,
         }
         else
         {
-            parseFileInfoList(buffer, i, fileInfo);
+            parseFileInfoList(buffer, i, head);
         }
         bzero(buffer, BUFLEN);
-        printf("%s done\n", servers[i].name);
+        //printf("%s done\n", servers[i].name);
         close(servers[i].sock);
     }
     return true;
 }
 
-bool allPiecesAvailable(FileInfo *fi)
+bool allPiecesAvailable(FileInfo* fi)
 {
     bool pieces[NUMSERVERS];
     for (int i = 0; i < NUMSERVERS; i++)
@@ -295,41 +296,46 @@ bool allPiecesAvailable(FileInfo *fi)
     return true;
 }
 
-void printFileInfoList(FileInfo *fi)
+void printFileInfoList(struct FileInfo** head)
 {
-    FileInfo *crawl = fi;
-    while (crawl != NULL)
+    FileInfo* cursor = *head;
+    while (cursor != NULL)
     {
-        printf("- %s", crawl->fileName);
-        bool isFileComplete = allPiecesAvailable(crawl);
+        printf("- %s", cursor->fileName);
+        bool isFileComplete = allPiecesAvailable(cursor);
         if (!isFileComplete)
         {
             printf(" [incomplete]");
         }
         printf("\n");
-        crawl = crawl->next;
+        cursor = cursor->next;
     }
 }
 
-void freeFileInfoList(FileInfo *fileInfo)
+void freeFileInfoList(struct FileInfo** head)
 {
-    FileInfo *tmp;
-    while (fileInfo != NULL)
-    {
-        tmp = fileInfo;
-        fileInfo = fileInfo->next;
-        free(tmp);
-    }
+    // FileInfo *tmp;
+    // while (fileInfo != NULL)
+    // {
+    //     tmp = fileInfo;
+    //     fileInfo = fileInfo->next;
+    //     if (tmp->fileName != NULL)
+    //     {
+    //         free(tmp->fileName);
+    //     }
+    //     free(tmp);
+    // }
 }
 
 bool list(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 {
-    FileInfo *fileInfo = (FileInfo *) malloc(sizeof(FileInfo));
-    getFileInfoList(servers, user, fileName, fileInfo);
+    struct FileInfo *head = NULL;
 
-    printFileInfoList(fileInfo);
+    getFileInfoList(servers, user, fileName, &head);
+
+    printFileInfoList(&head);
     
-    freeFileInfoList(fileInfo);
+    freeFileInfoList(&head);
     return true;
 }
 
@@ -514,8 +520,36 @@ bool put(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
     return true;
 }
 
+FileInfo* getFileInfo(char *fileName, FileInfo *fileList)
+{
+    FileInfo* cursor = fileList;
+    while (cursor != NULL)
+    {
+        if (strcmp(cursor->fileName, fileName) == 0)
+        {
+            return cursor;
+        }
+        cursor = cursor->next;
+    }
+    return cursor;
+}
+
 bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
 {
+    // FileInfo *fileInfoList = (FileInfo *) malloc(sizeof(FileInfo));
+    // getFileInfoList(servers, user, fileName, fileInfoList);
+
+    // FileInfo *fileInfo = getFileInfo(fileName, fileInfoList);
+
+    // if (fileInfo == NULL)
+    // {
+    //     printf("Didn't find %s\n", fileName);
+    // }
+
+    // for (int i = 0; i < NUMSERVERS; i++)
+    // {
+
+    // }
     return false;
 }
 

@@ -151,22 +151,63 @@ bool handlePut(int clientSock, User *user, char *userDir, char *buffer)
     return true;
 }
 
-bool handleGet(int clientSock, User *user, char *userDir, char *buffer)
-{
-    printf("trying to handle get\n");
-    return true;
-}
-
-void getFolderContents(char *userDir, char *buffer)
-{
-    
-}
-
 int getFileSize(char *fileName)
 {
     struct stat st;
     stat(fileName, &st);
     return st.st_size;
+}
+
+bool sendPiece(int clientSock, char *buffer, FILE *pieceFile, int bytesToBeRead)
+{
+    int bytesRead = 0;
+    int readBufferSize = fmin(bytesToBeRead, BUFLEN);
+    
+    if (recv(clientSock, buffer, 1, 0) != 1)
+    {
+        printf("no confirmation received\n");
+        close(clientSock);
+        return false;
+    }
+
+    while ( bytesToBeRead > 0 && (bytesRead = fread(buffer, 1, readBufferSize, pieceFile)) > 0)
+    {
+        write(clientSock, buffer, bytesRead);
+        //printf("sent %d bytes for piece %d\n", sentBytes, pieceInfo->pieceNum);
+        bytesToBeRead -= bytesRead;
+        
+        readBufferSize = fmin(bytesToBeRead, BUFLEN);
+        bzero(buffer, BUFLEN);
+    }
+
+    return true;
+}
+
+bool handleGet(int clientSock, User *user, char *userDir, char *buffer)
+{
+    printf("trying to handle get\n");
+
+    PieceInfo pieceInfo;
+    read(clientSock, buffer, BUFLEN);
+    deserializePieceInfo(buffer, &pieceInfo);
+    printPieceInfo(&pieceInfo);
+
+    FILE *pieceFile;
+    char pieceFileName[50];
+    getPieceFileName(userDir, &pieceInfo, pieceFileName);
+
+    pieceFile = fopen(pieceFileName, "rb");
+    if (!pieceFile)
+    {
+        return false;
+    }
+    
+    return sendPiece(clientSock, buffer, pieceFile, getFileSize(pieceFileName));
+}
+
+void getFolderContents(char *userDir, char *buffer)
+{
+    
 }
 
 bool handleList(int clientSock, User *user, char *userDirName, char *buffer)
