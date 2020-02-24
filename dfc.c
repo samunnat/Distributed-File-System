@@ -524,7 +524,7 @@ void writePiece(int serverSock, char* buffer, FILE *fp)
     int received_bytes = 0;
     while ((received_bytes = read(serverSock, buffer, BUFLEN)) > 0) 
     {
-        printf("received %d bytes\n", received_bytes);
+        //printf("received %d bytes\n", received_bytes);
         fwrite(buffer, 1, received_bytes, fp);
         
         bzero(buffer, BUFLEN);
@@ -541,6 +541,7 @@ bool get(ServerInfo servers[NUMSERVERS], User *user, char *fileName)
     if (fileInfo == NULL)
     {
         printf("Didn't find %s\n", fileName);
+        return false;
     }
     printf("%s\n", fileInfo->fileName);
     for (int i = 0; i < NUMSERVERS*2; i++)
